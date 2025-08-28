@@ -1,13 +1,14 @@
 apiVersion: automation.cloudbees.io/v1alpha1
 kind: workflow
-name: Heartbeat-workflow
+name: My automation
+
 on:
   schedule:
     - cron: 0,6,12,18,24,30,36,42,48,54 * * * *
   push:
     branches:
-      - main
-  workflow_dispatch:
+      - 'main' 
+#  workflow_dispatch:
 
 env:
   ORGANIZATION_URL: '${{ vars.ORGANIZATION_URL }}'
@@ -15,7 +16,7 @@ env:
   WORKFLOW_ID: '${{ vars.WORKFLOW_ID }}'
   BRANCH_ID: '${{ vars.BRANCH_ID }}'
   CLUSTER_ENVIRONMENT: '${{ vars.CLUSTER_ENVIRONMENT }}'
-  
+
 jobs:
   build:
     outputs:
@@ -40,4 +41,65 @@ jobs:
         uses: docker://golang:1.23.2
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -tags netgo -ldflags '-w -extldflags \"-static\"' -o smoke-tester --buildvcs=0
-          
+  exec-dd-pipeline:
+    needs: [build]
+    steps:
+      - uses: docker://alpine/curl
+        name: DataDog CI Pipeline - success
+        kind: build
+        env:
+          DD_API_KEY: ${{ secrets.SRE_SMOKE_TEST_DD_API_KEY }}
+          RUN_ID: ${{ cloudbees.run_id }}
+          SCM_SHA: ${{ cloudbees.scm.sha }}
+          SCM_BRANCH: ${{ cloudbees.scm.branch }}
+        run: |
+          # NOTE: DataDog is  really really picky about the CI event format.  Be careful changing too much at once.
+          # This is not really the event start time but for scheduled we don't have head commit data when running
+          # on schedule, but the actual commit will have the data
+          START=${{ format('{0}', needs.build.outputs.message) }}
+          # START=$(date -Iseconds)
+          # DataDog can not handle the [bot] in the real email address
+          SCM_EMAIL="saas-sre@cloudbees.com"
+          END=$(date -Iseconds)
+          echo "hello"
+          cat > payload.txt <<EOF
+          {
+            "data": {
+              "attributes": {
+                  "env": "${CLUSTER_ENVIRONMENT}",
+                  "resource": {
+                      "level": "pipeline",
+                      "unique_id": "${RUN_ID}",
+                      "start": "${START}",
+                      "end": "${END}",
+                      "partial_retry": false,
+                      "status": "success",
+                      "name": "sre-saas-smoketest",
+                      "node": {
+                        "name": "$(hostname)"
+                      },
+                      "pipeline_id": "${RUN_ID}",
+                      "git": {
+                        "sha": "${SCM_SHA}",
+                        "branch": "${SCM_BRANCH}",
+                        "author_email": "${SCM_EMAIL}"
+                      },
+                      "url": "${ORGANIZATION_URL}/components/${COMPONENT_ID}/runs/branches/${BRANCH_ID}/workflows/${WORKFLOW_ID}/runs/${RUN_ID}/attempts/1"
+                    }
+              },
+              "type": "cipipeline_resource_request"
+            }
+          }
+          EOF
+          echo "hello"
+          cat payload.txt
+
+
+          curl \
+          --fail \
+          -X POST "https://api.datadoghq.com/api/v2/ci/pipeline" \
+          -H "Content-Type: application/json" \
+          -H "DD-API-KEY: $DD_API_KEY" \
+          -d @payload.txt
+
+          echo CI Pipeline Event sent
