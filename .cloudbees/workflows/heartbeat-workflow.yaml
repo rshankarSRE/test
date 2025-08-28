@@ -18,9 +18,26 @@ env:
   
 jobs:
   build:
+    outputs:
+      message: ${{ steps.write-message.outputs.message }}
+    permissions:
+      scm-token-own: read
+      scm-token-org: read
+      id-token: write
     steps:
-      - name: Say hello
-        uses: docker://golang:1.20.3-alpine3.17
-        shell: sh
+      - name: Get source code
+        uses: cloudbees-io/checkout@v1
+      - name: Setup git credentials
+        uses: cloudbees-io/configure-git-global-credentials@v1
+      - id: write-message
+        name: write-message
+        uses: docker://alpine:latest
         run: |
-          echo "hello world"
+          printf %s $(date -Iseconds) > $CLOUDBEES_OUTPUTS/message
+      - id: build
+        name: Build using the shared action
+        if: ${{ vars.workflow_execution_env == 'production' }}
+        uses: docker://golang:1.23.2
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -tags netgo -ldflags '-w -extldflags \"-static\"' -o smoke-tester --buildvcs=0
+          
