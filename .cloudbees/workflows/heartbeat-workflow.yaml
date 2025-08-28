@@ -8,7 +8,14 @@ on:
     branches:
       - main
   workflow_dispatch:
-    
+
+env:
+  ORGANIZATION_URL: '${{ vars.ORGANIZATION_URL }}'
+  COMPONENT_ID: '${{ vars.COMPONENT_ID }}'
+  WORKFLOW_ID: '${{ vars.WORKFLOW_ID }}'
+  BRANCH_ID: '${{ vars.BRANCH_ID }}'
+  CLUSTER_ENVIRONMENT: '${{ vars.CLUSTER_ENVIRONMENT }}'
+  
 jobs:
   build:
     steps:
